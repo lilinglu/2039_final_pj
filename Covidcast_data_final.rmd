@@ -1,0 +1,332 @@
+---
+title: "Final_Project_Covid"
+author: "Chenyi&Liling"
+date: "10/20/2020"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    number_sections: true
+    toc_depth: '3'
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+
+# Brief Summary
+
+(1) Research question
+
+In this project, we are trying to analysis what outcomes affect Covid19 cases a lot based on the Covidcast dataset. Out of curious, we loaded the data stream from 7/1/2020 to 10/1/2020 to see if there is any change in the cases before and after school term began. 
+
+(2) Variables selected
+
+Independent variables:
+Full_time_prop: Fraction of people spending 6hr or more from home that day in Allegheny County
+Part_time_prop: Fraction of people spending 3-6hr from home that day in Allegheny County.
+cli_prop: Percentage of people with COVID-like symptoms, based on surveys of Facebook users
+adjcli_prop: Percentage of daily doctor visits that are due to COVID-like symptoms
+hcmcli_prop: Percentage of people who know someone in their local community with COVID-like symptoms, based on surveys of Facebook users
+cbine_indi: Combination of several COVID-19 indicators available at this geographic level  
+search_volum: Relative frequency of COVID-related Google searches 
+All of them are numerical data. 
+We also created death_rate(numerical) and weekday (character) to have a good look at the data. 
+
+Dependent variables:
+Newly reported COVID-19 cases per 100,000 people (7-day average)
+deaths: Newly reported COVID-19 deaths (7-day average) as our dependent variables, both of which are numerical data too.
+
+(3) Trends
+
+a. Missing value. We loaded 93 observations bounded in Allegheny county (geo_value = 42003,note, for google_search we used msa=38300 because 42003 always fetch data failure) totally. Google_search has 3 missing value on days 20200817/20200821/20200919, so after merge all the signals we dropped 3 observations of these three days.
+
+b. Time series indicated cases/hcmcli_pro/cbine_indi/adjcli_prop were decreasing since mid-July while death_rate had a surge on early September. The other variables didn't have significant change.
+
+c. Correlation analysis: Not like I expected, Partime_prop and fultime_prop didn't have much influence on cases number. Whereas, the variables which have big corr value with cases are adjcli_prop/hcmcli_prop/cbine_indi with 0.75/0.84/0.87 respectively. In our future work, we would do further study on those variables with big corr values.
+
+d. Weekday trends: Except fultime_prop and Partime_prop which had significant lower value on weekends, all the other variables didn't have difference on each weekdays.
+
+
+# library loading
+
+```{r cars}
+devtools::install_github("cmu-delphi/covidcast", ref = "main",
+                         subdir = "R-packages/covidcast", force = TRUE)
+
+library(covidcast)
+library(corrplot)
+library(ggplot2)
+library(patchwork)
+library(reshape)
+library(reshape)
+library(mosaic)
+```
+
+
+# Ferching data 
+
+## Ferching data from google search signal 
+
+```{r}
+google_search <- covidcast_signal(data_source = "ght", signal = "smoothed_search",
+                   start_day = "2020-07-1", end_day = "2020-10-1",
+                   geo_type = "msa", geo_value = "38300")
+nrow(google_search)
+```
+
+We noticed that no results fetched on days 2020-08-18, 2020-08-22 and 2020-09-20, means we have 3 missing values.
+
+## Fetching data from other signals
+
+```{r}
+start_d <- "2020-07-1"
+end_d <- "2020-10-1"
+source_signal <- list(c("safegraph","full_time_work_prop"), c("safegraph","part_time_work_prop"), c("fb-survey", "smoothed_cli"),c("doctor-visits","smoothed_adj_cli"),c("fb-survey", "smoothed_hh_cmnty_cli"),c("indicator-combination", "nmf_day_doc_fbc_fbs_ght"),c("indicator-combination","confirmed_7dav_incidence_num"),c("indicator-combination", "deaths_7dav_incidence_num"))
+datalist = list()
+for ( i in 1:8){datalist[[i]] <- suppressMessages(
+  covidcast_signal(data_source = source_signal[[i]][1], signal = source_signal[[i]][2],
+                   start_day = start_d, end_day = end_d,
+                   geo_type = "county",geo_value = "42003")
+)
+print (nrow(datalist[[i]]))}
+```
+
+We've checked the number of rows for each dataframe, there is no missing value.
+Full_time_prop: Fraction of people spending 6hr or more from home that day in Allegheny County
+Part_time_prop: Fraction of people spending 3-6hr from home that day in Allegheny County.
+cli_prop: Percentage of people with COVID-like symptoms, based on surveys of Facebook users
+adjcli_prop: Percentage of daily doctor visits that are due to COVID-like symptoms
+hcmcli_prop: Percentage of people who know someone in their local community with COVID-like symptoms, based on surveys of Facebook users
+cbine_indi: Combination of several COVID-19 indicators available at this geographic level  
+cases:Newly reported COVID-19 cases per 100,000 people (7-day average)
+deaths: Newly reported COVID-19 deaths (7-day average)
+search_volum: Relative frequency of COVID-related Google searches
+
+# Processing data
+
+## Data merging
+
+```{r}
+data <- cbind.data.frame(datalist[[1]]$time_value,datalist[[1]]$value,datalist[[2]]$value,datalist[[3]]$value,datalist[[4]]$value,datalist[[5]]$value,datalist[[6]]$value,datalist[[7]]$value,datalist[[8]]$value)
+oldnames <- c("datalist[[1]]$time_value","datalist[[1]]$value","datalist[[2]]$value","datalist[[3]]$value","datalist[[4]]$value","datalist[[5]]$value","datalist[[6]]$value","datalist[[7]]$value","datalist[[8]]$value")
+newnames <- c("date","fultime_prop","partime_prop", "cli_prop","adjcli_prop","hcmcli_prop","cbine_indi","cases","deaths")
+for (i in 1:9){names(data)[names(data)==oldnames[i]]=newnames[i]}
+data<-data[!(data$date== "2020-08-17"|data$date=="2020-08-21"|data$date=="2020-09-19"),]
+data$search_volum <- google_search$value
+data$death_rate <- data$deaths/data$cases
+```
+
+As we've checked previously, the rows for data frames except google_search are perfectly lined up, there is no missing value, so we just past columns together using cbind instead of join function. To combine google_search value, we dropped 3 observations (on days 2020-08-18, 2020-08-22 and 2020-09-20), so that they can line up with google_search. We also created variable death_rate for further use.
+
+Data summary: we totally have 90 observations with 11 columns.Except time_value is date type, all the others are numerical data.
+
+```{r}
+head(data)
+str(data)
+```
+
+# Preliminary data analysis
+
+## Univariate analysis
+
+### Numerical summary
+
+```{r}
+cols <- c("fultime_prop","partime_prop", "cli_prop","adjcli_prop","hcmcli_prop","cbine_indi","search_volum","cases","deaths")
+fav_list <-list()
+for (i in 1:9){fav_list[[i]]<-favstats(data[[cols[i]]])
+}
+fav_stas_df <- rbind(fav_list[[1]],fav_list[[2]],fav_list[[3]],fav_list[[4]],fav_list[[5]],fav_list[[6]],fav_list[[7]],fav_list[[8]],fav_list[[9]])
+row.names(fav_stas_df) <- cols
+fav_stas_df
+```
+
+### Vasualization
+
+```{r}
+p1<-ggplot(data, aes(x=date, y=death_rate))+geom_line(color='red')+labs(title="Death_rate Trend")
+p2<-ggplot(data, aes(x=date, y=cases))+geom_line(color='blue')+labs(title="Cases Trend")
+p3<-ggplot(data, aes(x=date, y=fultime_prop))+geom_line(color='yellow')+labs(title="Fultime_prop Trend")
+p4<-ggplot(data, aes(x=date, y=partime_prop))+geom_line(color='green')+labs(title="Partime_prop Trend")
+p5<-ggplot(data, aes(x=date, y=cbine_indi))+geom_line(color='purple')+labs(title="Cbine_indi Trend")
+p6<-ggplot(data, aes(x=date, y=hcmcli_prop))+geom_line(color='pink')+labs(title="Hcmcli_prop Trend")
+p7<-ggplot(data, aes(x=date, y=adjcli_prop))+geom_line(color='black')+labs(title="Adjcli_prop Trend")
+p8<-ggplot(data, aes(x=date, y=cli_prop))+geom_line(color='grey')+labs(title="cli_prop Trend")
+p9<-ggplot(data, aes(x=date, y=search_volum))+geom_line(color='dark blue')+labs(title="Google_search Trend")
+p1+p2+p3+p4+p5+p6+p7+p8+p9
+```
+cases peak in mid July and decrease steadily. 
+death rate has been stable 
+the cbine indicators shows a similar trends with the doctor's visit and the cases, peaking in mid July 
+Percentage of people who know someone in their local community with COVID-like symptoms peaks in mid July, which is the same as the cases.
+Percentage of daily doctor visits that are due to COVID-like symptoms
+Percentage of people with COVID-like symptoms variate from July to October, it has 3 peaks in late July, early August,and late August. It also ends with an increase in Oct. 
+
+## Bivariate analysis
+
+### Numerical correlation calculation 
+
+```{r}
+data3<-subset(data,select = -c(date,death_rate))
+r <- cor(data3)
+r_df <- data.frame((r))
+cor_cases <- subset(r_df, select=c('cases','deaths'))
+cor_cases <- cor_cases[order(cor_cases$cases),]
+cor_cases
+```
+
+number of death, Fraction of people spending 6hr or more from home that day, Fraction of people spending 3-6 hrs from home that day and searching volumn in google have a weak negative relationship to the number of cases. while Percentage of people with COVID-like symptoms show a weak positive correlation to the cases number. Lastly, Percentage of daily doctor visits that are due to COVID-like symptoms, Percentage of people who know someone in their local community with COVID-like symptoms, and Combination of several COVID-19 indicators showed to be strongly related to the number of cases(>0.75).
+
+### Correlation visualization
+
+```{r,fig.width=15}
+library(GGally)
+my_density <- function(data3, mapping){
+  ggplot(data = data3, mapping = mapping) + 
+    geom_density(alpha = 0.5,
+                 fill = "cornflowerblue")
+}
+my_scatter <- function(data3, mapping){
+  ggplot(data = data3, mapping = mapping) + 
+    geom_point(alpha = 0.5,
+               color = "cornflowerblue") + 
+    geom_smooth(method=lm, 
+                se=FALSE,show.legend = FALSE)
+}
+ggpairs(data3, 
+        lower=list(continuous = my_scatter), 
+        diag = list(continuous = my_density)) +
+  labs(title = "Correlation") +
+  theme_bw()
+
+```
+
+```{r}
+M <- cor(data[ c("fultime_prop","partime_prop", "adjcli_prop","hcmcli_prop","search_volum","cbine_indi","cases","deaths", "death_rate")])
+corrplot(M)
+```
+The hot map agrees with correlation graph above, the more related the darker the dot color.
+
+### Viriable aggreagted on weekdays (Monday to Sunday)
+
+```{r, fig.height=5}
+#library(ply)
+data$day <- weekdays(data$date)
+P1<-data %>% dplyr::group_by(day) %>% dplyr::summarize(cli_mean_prop = mean(cli_prop, na.rm=TRUE)) %>% ggplot(aes(x=day,y=cli_mean_prop))+geom_bar(stat="identity",fill="#3eede7") + theme(axis.text.x = element_text(angle =45))
+P2<-data %>% dplyr::group_by(day) %>% dplyr::summarize(adjcli_mean_prop = mean(adjcli_prop, na.rm=TRUE))%>% ggplot(aes(x=day,y=adjcli_mean_prop))+geom_bar(stat="identity", fill="#177cb0")+ theme(axis.text.x = element_text(angle =45))
+P3<-data %>% dplyr::group_by(day) %>% dplyr::summarize(fultime_mean_prop = mean(fultime_prop, na.rm=TRUE)) %>% ggplot(aes(x=day,y=fultime_mean_prop))+geom_bar(stat="identity",fill="#065279") + theme(axis.text.x = element_text(angle =45))
+P4<-data %>% dplyr::group_by(day) %>% dplyr::summarize(partime_mean_prop = mean(partime_prop, na.rm=TRUE))%>% ggplot(aes(x=day,y=partime_mean_prop))+geom_bar(stat="identity", fill="#003472")+ theme(axis.text.x = element_text(angle =45))
+P5<-data %>% dplyr::group_by(day) %>% dplyr::summarize(mean_cases = mean(cases, na.rm=TRUE)) %>% ggplot(aes(x=day,y= mean_cases))+geom_bar(stat="identity",fill="#4b5cc4") + theme(axis.text.x = element_text(angle =45))
+P6<-data %>% dplyr::group_by(day) %>% dplyr::summarize(searchv_mean = mean(search_volum, na.rm=TRUE))%>% ggplot(aes(x=day,y=searchv_mean))+geom_bar(stat="identity", fill="cornflowerblue")+ theme(axis.text.x = element_text(angle =45))
+P7<-data %>% dplyr::group_by(day) %>% dplyr::summarize(hcmcli_mean = mean(hcmcli_prop, na.rm=TRUE)) %>% ggplot(aes(x=day,y=hcmcli_mean))+geom_bar(stat="identity",fill="#2e4e7e") + theme(axis.text.x = element_text(angle =45))
+P8<-data %>% dplyr::group_by(day) %>% dplyr::summarize(deaths_mean = mean(deaths, na.rm=TRUE))%>% ggplot(aes(x=day,y=deaths_mean))+geom_bar(stat="identity", fill="#44cef6")+ theme(axis.text.x = element_text(angle =45))
+P9<-data %>% dplyr::group_by(day) %>% dplyr::summarize(cbine_mean = mean(cbine_indi, na.rm=TRUE)) %>% ggplot(aes(x=day,y=cbine_mean))+geom_bar(stat="identity",fill="#1685a9") + theme(axis.text.x = element_text(angle =45))
+P1+P2+P3+P4+P5+P6+P7+P8+P9
+```
+
+interestingly, people have different amount of time away from home in weekend, but the cases number does not varies because of the weekend.
+# Hypothesis testing
+
+## Test linear relationship between principle varibles and covid cases
+
+Define principle variables as correlation coefficient value >= 0.7, thus from our previous section, adjcli_prop,		
+hcmcli_prop, cbine_indi are our principle variables.
+
+```{r}
+head(data3)
+P10 <- ggplot(data3, aes(y=cases, x = adjcli_prop))+geom_point()+geom_smooth(method = "lm")+theme_classic()
+P11 <- ggplot(data3, aes(y=cases, x = hcmcli_prop))+geom_point()+geom_smooth(method = "lm")+theme_classic()
+P12 <- ggplot(data3, aes(y=cases, x = cbine_indi))+geom_point()+geom_smooth(method = "lm")+theme_classic()
+P10 + P11 +P12
+```
+From the plot above, we can preliminarily assume that their relationships are linear.
+
+### Test adjcli_prop
+
+Hypothesis test to see if there is a significant linear relationship between adjcli_prop and covid cases
+
+1 check conditions
+2 hypothesis: h0: beta1 = 0, h1: beta1 != 0
+3 alpha = 0.05
+
+```{r}
+model1 <- lm(cases ~ adjcli_prop, data = data3)
+summary(model1)
+```
+
+4 conclusion
+
+### Test hcmcli_prop
+
+Hypothesis test to see if there is a significant linear relationship between hcmcli_prop and covid cases
+
+1 check conditions
+2 hypothesis: h0: beta1 = 0, h1: beta1 != 0
+3 alpha = 0.05
+
+```{r}
+model2 <- lm(cases ~ hcmcli_prop, data = data3)
+summary(model2)
+```
+
+4 conclusion
+
+### Test cbine_indi
+
+Hypothesis test to see if there is a significant linear relationship between cbine_indi and covid cases
+
+1 check conditions
+2 hypothesis: h0: beta1 = 0, h1: beta1 != 0
+3 alpha = 0.05
+
+```{r}
+model3 <- lm(cases ~ cbine_indi, data = data3)
+summary(model3)
+```
+
+## Two-sample mean t test
+
+Hypothesis test to see if there is any change in the mean cases before and after school term began (assume fall term began at 8/15/2020)
+
+```{r}
+head(data)
+data4<-subset(data,select = c(date,cases))
+data4$group[data$date<="2020-08-15"] = "1" 
+data4$group[data$date>"2020-08-15"] = "2"
+head(data4)
+tail(data4)
+```
+
+
+1 check conditions for a two-sample t test
+a. simple random samples from two populations, assumed
+b. 2 independent groups, assumed
+c. n1>30, n2>30, yes
+d. if population variances are equal?
+
+```{r}
+var.test(cases ~ group, data=data4, alternative = "two.sided")
+```
+
+p-value<2.2e-16<0.05, we have no evidence that the population variances for the two groups are equal.
+
+2 two sample t-test with unequal variances
+
+hypothesis  h0: u1 - u2 = 0, h1: u1 - u2 != 0
+u1 is the true mean cases for group 1, u2 is the true mean cases for group 2.
+
+3 alpha = 0.05
+
+```{r}
+t.test(data4$cases~data4$group, alternative = "two.sided", conf.level = 0.95)
+```
+
+
+4 conclusion: p-value < 2.2e-16 < 0.05, we have strong evidence to reject ho, meaning that the true mean cases in group 1 and group two are significantly statistically different. 95% CI is (64, 90), means we are 95% confident that the true mean cases for group 1 is between 64 and 90 higher than the true mean cases for group 2. In the contest of the situation of this study, it means that there is significant change in the mean cases before and after school term began (assume fall term began at 8/15/2020). Further more, the true mean cases after fall term began dropped between 64 and 90 compared to before fall term.
+
+
+
