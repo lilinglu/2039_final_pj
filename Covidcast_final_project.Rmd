@@ -1,0 +1,432 @@
+---
+title: "Final_Project_Covid"
+author: "Chenyi&Liling"
+date: "10/20/2020"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    number_sections: true
+    toc_depth: '3'
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+
+# Brief Summary
+
+(1) Data set description
+
+This data set was collected from COVIDcast API developed and maintained by Carnegie Mellon University. The aggregated information on the API was based on a research survey on Facebook intended to monitor the spread and impact of he COVID-19 pandemic in the United States.
+
+We loaded data from Covidcast running from 7/1/2020 to 10/1/2020, which are totally 93 observations within Allegheny county represented by geo_value(FIPS state code) = 42003. However, because 42003 always fetch data failure for google_search term, we used msa(metropolitan statistical area)=38300 to handle the error. Google_search has 3 missing value on days August 17,21 and September 19, so after merging all the signals we dropped 3 observations of these three days.
+
+(2) Research question
+
+a. We are trying to find the variables that are associated with Covid-19 cases based on the Covidcast dataset. 
+
+b. To check if there is any change in the number of cases before and after the beginning of schools (assume fall term started at 8/15/2020 for all schools). 
+
+c. Test linear relationship between the possible related variables and covid cases.
+
+(3) Variables selected
+
+* Independent variables: quantitative 
+
+a.	Full_time_prop: Fraction of people spending 6hr or more from home that day in Allegheny County
+
+b.	Part_time_prop: Fraction of people spending 3-6hr from home that day in Allegheny County.
+
+c.	cli_prop: Percentage of people with COVID-like symptoms, based on surveys of Facebook users (suspect_prop)
+
+d.	adjcli_prop: Percentage of daily doctor visits that are due to COVID-like symptoms (doc_vist)
+
+e.	hcmcli_prop: Percentage of people who know someone in their local community with COVID-like symptoms, based on surveys of Facebook users (local_prop)
+
+f.	cbine_indi: Combination of several COVID-19 indicators available at this geographic level 
+
+g.	search_volum: Relative frequency of COVID-related Google searches 
+
+* Dependent variables: quantitative
+
+a.	Case: Newly reported COVID-19 cases per 100,000 people (7-day average)
+
+b.	death_rate: Newly reported COVID-19 deaths (7-day average) as our dependent variables, both of which are numerical data.
+
+To better evaluate the relationship between variable and the case number, we add some variables death_rate(quantitative) and weekday (qualitative). 
+
+(4) Trends found in the analysis
+
+a.	Time series indicated the overall number of cases were decreasing since mid-July while the death rate increased on early September. Overall proportion of the indicator (combined indicator), doctor visits and the cases observed by people in the community has decresed, which is corresponded to the case number decrease. Other variables didn't have significant change in the observed time range.
+
+b.	In the correlation analysis, interestingly, the proportion of people spending away from home on that day didn't correspond to the cases number. Whereas the variables including Percentage of daily doctor visits (adjcli_prop), percentage of people who know someone in their local community with COVID-like symptoms (hcmcli_prop), and Combination of several COVID-19 indicators available at this geographic level (cbine_indi) have strong correlation with the number of cases with correlation  0.75, 0.84, and 0.87 respectively. Further linear regression test prove they have statistic significance linear relationship with covid cases.
+
+c.	Weekday trends: we selected the variables which are not smoothed originally and plot the week day trend. We found that the covid cases and deaths number do not differ from weekday to weekend. As expected, fultime_prop and Partime_prop had significant lower value on weekends.
+
+(5) Hypothesis tests
+
+a. According to our tests result, there are three variables have strong linear relationship with covid cases: Percentage of daily doctor visits (adjcli_prop), percentage of people who know someone in their local community with COVID-like symptoms (hcmcli_prop) and Combination of several COVID-19 indicators available at this geographic level (cbine_indi).
+
+b. The two sample t-test shows that the mean cases of Covid-19 significantly decreased after school fall term began, which is out of our expectation.
+
+
+# library loading
+
+```{r include=FALSE}
+devtools::install_github("cmu-delphi/covidcast", ref = "main",
+                         subdir = "R-packages/covidcast", force = TRUE)
+
+library(covidcast)
+library(corrplot)
+library(ggplot2)
+library(patchwork)
+library(reshape)
+library(reshape)
+library(mosaic)
+library(lmPerm)
+```
+
+
+# Ferching data 
+
+## Ferching data from google search signal 
+
+```{r include=FALSE}
+google_search <- covidcast_signal(data_source = "ght", signal = "smoothed_search",
+                   start_day = "2020-07-1", end_day = "2020-10-1",
+                   geo_type = "msa", geo_value = "38300")
+nrow(google_search)
+```
+
+If we don't choose include=FALSE, we can see the whole process of fetching data. It shows missing data on date: 2020-08-18, 2020-08-22 and 2020-09-20, three days in total, will be excluded from the study dataset.
+
+## Fetching data from other signals for other variables
+
+```{r}
+start_d <- "2020-07-1"
+end_d <- "2020-10-1"
+source_signal <- list(c("safegraph","full_time_work_prop"), c("safegraph","part_time_work_prop"), c("fb-survey", "smoothed_cli"),c("doctor-visits","smoothed_adj_cli"),c("fb-survey", "smoothed_hh_cmnty_cli"),c("indicator-combination", "nmf_day_doc_fbc_fbs_ght"),c("indicator-combination","confirmed_7dav_incidence_num"),c("indicator-combination", "deaths_7dav_incidence_num"))
+datalist = list()
+for ( i in 1:8){datalist[[i]] <- suppressMessages(
+  covidcast_signal(data_source = source_signal[[i]][1], signal = source_signal[[i]][2],
+                   start_day = start_d, end_day = end_d,
+                   geo_type = "county",geo_value = "42003")
+)
+print (nrow(datalist[[i]]))}
+```
+
+No missing value was found in the dataset.
+
+Full_time_prop: Fraction of mobile devices spending 6hr or more at a locatin other than their home during daytime in Allegheny County
+Part_time_prop: Fraction of people spending 3-6hr at a locatin other than their home during daytime in Allegheny County
+cli_prop: Percentage of people with COVID-like symptoms, based on surveys of Facebook users
+adjcli_prop: Percentage of daily doctor visits that are due to COVID-like symptoms
+hcmcli_prop: Percentage of people who know someone in their local community with COVID-like symptoms, based on surveys of Facebook users
+cbine_indi: Combination of several COVID-19 indicators available at this geographic level  
+cases:Newly reported COVID-19 cases per 100,000 people (7-day average)
+deaths: Newly reported COVID-19 deaths (7-day average)
+search_volum: Relative frequency of COVID-related Google searches
+
+# Processing data
+
+## Data merging
+
+```{r}
+data <- cbind.data.frame(datalist[[1]]$time_value,datalist[[1]]$value,datalist[[2]]$value,datalist[[3]]$value,datalist[[4]]$value,datalist[[5]]$value,datalist[[6]]$value,datalist[[7]]$value,datalist[[8]]$value)
+oldnames <- c("datalist[[1]]$time_value","datalist[[1]]$value","datalist[[2]]$value","datalist[[3]]$value","datalist[[4]]$value","datalist[[5]]$value","datalist[[6]]$value","datalist[[7]]$value","datalist[[8]]$value")
+newnames <- c("date","fultime_prop","partime_prop", "cli_prop","adjcli_prop","hcmcli_prop","cbine_indi","cases","deaths")
+for (i in 1:9){names(data)[names(data)==oldnames[i]]=newnames[i]}
+data<-data[!(data$date== "2020-08-17"|data$date=="2020-08-21"|data$date=="2020-09-19"),]
+data$search_volum <- google_search$value
+data$death_rate <- data$deaths/data$cases
+```
+
+As all the signal data were fetched in same time range and we also checked missing value previously, dataframes for all signals except google_search are perfectly lined up, so columns were merged together using cbind instead of join function. To combine google_search value, we dropped 3 observations (on days 2020-08-18, 2020-08-22 and 2020-09-20), so that they can line up with google_search. Variable death_rate were created as dependent variable for further use.
+
+Data summary: we totally have 90 observations with 11 columns.Except time_value is date type, all the others are numerical data.
+
+# Preliminary data analysis
+
+## Univariate analysis
+
+### Numerical summary
+
+```{r}
+cols <- c("fultime_prop","partime_prop", "cli_prop","adjcli_prop","hcmcli_prop","cbine_indi","search_volum","cases","deaths")
+fav_list <-list()
+for (i in 1:9){fav_list[[i]]<-favstats(data[[cols[i]]])
+}
+fav_stas_df <- rbind(fav_list[[1]],fav_list[[2]],fav_list[[3]],fav_list[[4]],fav_list[[5]],fav_list[[6]],fav_list[[7]],fav_list[[8]],fav_list[[9]])
+row.names(fav_stas_df) <- cols
+fav_stas_df
+```
+
+### Vasualization
+
+```{r}
+ggplot(data, aes(x=date, y=death_rate))+geom_line(color='red')+labs(title="Death Rate Trend")+theme_classic()
+```
+
+The death rate climbs up from July to August and peaks at the end of August, then decrease drarmaticly in September.
+
+```{r}
+ggplot(data, aes(x=date, y=cases))+geom_line(color='blue')+labs(title="Cases Trend")+theme_classic()
+```
+
+The number of covid cases peaks in the middle of July and drops steadily in August and stays stable in September and October.
+
+```{r}
+ggplot(data, aes(x=date, y=fultime_prop))+geom_line(color='yellow')+labs(title="Fraction of people spending 6hr or more away from home Trend")+theme_classic()
+```
+
+From July to October, there is not much change in the proportion of people who spend more than 6 hours working away from home. We can see a slightly increase in the trend.
+
+```{r}
+ggplot(data, aes(x=date, y=partime_prop))+geom_line(color='green')+labs(title="Partime_prop Trend")+theme_classic()
+```
+
+Proportion of part time people have the same trend along the time.
+
+```{r}
+ggplot(data, aes(x=date, y=cbine_indi))+geom_line(color='purple')+labs(title="Cbine_indi Trend")+theme_classic()
+```
+
+Combination of several COVID-19 indicators shows a similar trends with the number of cases, peaking in mid July and dropping steadily in August and stays stable in September and October.
+
+```{r}
+ggplot(data, aes(x=date, y=cli_prop))+geom_line(color='grey')+labs(title="Percentage of suspect Symptoms Trend")+theme_classic()
+```
+
+Percentage of people with COVID-like symptoms variate from July to October, it has 3 peaks in late July, early August,and late August. It also ends with an increase in Oct. 
+
+```{r}
+ggplot(data, aes(x=date, y=hcmcli_prop))+geom_line(color='pink')+labs(title="Percentage of suspect symptoms Trend")+theme_classic()
+```
+
+Percentage of people who know someone in their local community with COVID-like symptoms peaks in mid July, which is the same as the cases.
+
+```{r}
+ggplot(data, aes(x=date, y=adjcli_prop))+geom_line(color='black')+labs(title="Percentage of daily doctor visits Trend")+theme_classic()
+```
+
+Percentage of daily doctor visits that are due to COVID-like symptoms has the same trend with number of covid cases.  
+
+```{r}
+ggplot(data, aes(x=date, y=search_volum))+geom_line(color='dark blue')+labs(title="Google search Trend")+theme_classic()
+```
+
+We don't see a significant change in the search volume along the time, except a high peak in the midlle of September, most likely something related to COVID happened that day.
+
+## Bivariate analysis
+
+### Numerical correlation calculation 
+
+```{r}
+data3<-subset(data,select = -c(date,death_rate))
+r <- cor(data3)
+r_df <- data.frame((r))
+cor_cases <- subset(r_df, select=c('cases','deaths'))
+cor_cases <- cor_cases[order(cor_cases$cases),]
+cor_cases
+```
+
+The number of death, Fraction of people spending 6hr or more from home that day, Fraction of people spending 3-6 hrs from home that day and searching volumn in google have a weak negative relationship to the number of cases. while Percentage of people with COVID-like symptoms show a weak positive correlation to the cases number. Lastly, Percentage of daily doctor visits that are due to COVID-like symptoms, Percentage of people who know someone in their local community with COVID-like symptoms, and Combination of several COVID-19 indicators showed to be strongly related to the number of cases(>0.75).
+
+### Correlation visualization
+
+```{r,message = FALSE, fig.width=15, fig.height=15}
+library(GGally)
+my_density <- function(data3, mapping){
+  ggplot(data = data3, mapping = mapping) + 
+    geom_density(alpha = 0.5,
+                 fill = "cornflowerblue")
+}
+my_scatter <- function(data3, mapping){
+  ggplot(data = data3, mapping = mapping) + 
+    geom_point(alpha = 0.5,
+               color = "cornflowerblue") + 
+    geom_smooth(method=lm, 
+                se=FALSE,show.legend = FALSE)
+}
+ggpairs(data3, 
+        lower=list(continuous = my_scatter), 
+        diag = list(continuous = my_density)) +
+  labs(title = "Correlation") +
+  theme_bw()
+
+```
+
+Looking at the correlation plot above, we noticed that fultime_prop and partime_prop, adjcli_prop and andcbine_indi, adjcli_prop adn cases, hcmcli_prop and cases, cbine_indi and cases are highly linear related with each other.
+
+```{r}
+M <- cor(data[ c("fultime_prop","partime_prop", "adjcli_prop","hcmcli_prop","search_volum","cbine_indi","cases","deaths", "death_rate")])
+corrplot(M)
+```
+
+The hot map agrees with correlation graph above. As the more related the darker the dot color, Percentage of daily doctor visits (adjcli_prop), percentage of people who know someone in their local community with COVID-like symptoms (hcmcli_prop), and : Combination of several COVID-19 indicators available at this geographic level (cbine_indi) has strong correlation with the number of cases.
+
+### Viriable aggreagted on weekdays (Monday to Sunday)
+
+```{r, message=FALSE,fig.height=5}
+#library(ply)
+data$day <- weekdays(data$date)
+#P1<-data %>% dplyr::group_by(day) %>% dplyr::summarize(cli_mean_prop = mean(cli_prop, na.rm=TRUE)) %>% #ggplot(aes(x=day,y=cli_mean_prop))+geom_bar(stat="identity",fill="#3eede7") + theme(axis.text.x = element_text(angle =45))
+#P2<-data %>% dplyr::group_by(day) %>% dplyr::summarize(adjcli_mean_prop = mean(adjcli_prop, na.rm=TRUE))%>% #ggplot(aes(x=day,y=adjcli_mean_prop))+geom_bar(stat="identity", fill="#177cb0")+ theme(axis.text.x = element_text(angle =45))
+P3<-data %>% dplyr::group_by(day) %>% dplyr::summarize(fultime_mean_prop = mean(fultime_prop, na.rm=TRUE)) %>% ggplot(aes(x=reorder(day,fultime_mean_prop),fultime_mean_prop))+geom_bar(stat="identity",fill="#065279") + theme(axis.text.x = element_text(angle =45))
+P4<-data %>% dplyr::group_by(day) %>% dplyr::summarize(partime_mean_prop = mean(partime_prop, na.rm=TRUE))%>% ggplot(aes(x=reorder(day,partime_mean_prop),partime_mean_prop))+geom_bar(stat="identity", fill="#003472")+ theme(axis.text.x = element_text(angle =45))
+P5<-data %>% dplyr::group_by(day) %>% dplyr::summarize(mean_cases = mean(cases, na.rm=TRUE)) %>% ggplot(aes(x=reorder(day, mean_cases),mean_cases))+geom_bar(stat="identity",fill="#4b5cc4") + theme(axis.text.x = element_text(angle =45))
+#P6<-data %>% dplyr::group_by(day) %>% dplyr::summarize(searchv_mean = mean(search_volum, na.rm=TRUE))%>% ggplot(aes(x=day,y=searchv_mean))+geom_bar(stat="identity", fill="cornflowerblue")+ theme(axis.text.x = element_text(angle =45))
+#P7<-data %>% dplyr::group_by(day) %>% dplyr::summarize(hcmcli_mean = mean(hcmcli_prop, na.rm=TRUE)) %>% ggplot(aes(x=day,y=hcmcli_mean))+geom_bar(stat="identity",fill="#2e4e7e") + theme(axis.text.x = element_text(angle =45))
+P8<-data %>% dplyr::group_by(day) %>% dplyr::summarize(deaths_mean = mean(deaths, na.rm=TRUE))%>% ggplot(aes(x=reorder(day,deaths_mean),deaths_mean))+geom_bar(stat="identity", fill="#44cef6")+ theme(axis.text.x = element_text(angle =45))
+#P9<-data %>% dplyr::group_by(day) %>% dplyr::summarize(cbine_mean = mean(cbine_indi, na.rm=TRUE)) %>% ggplot(aes(x=day,y=cbine_mean))+geom_bar(stat="identity",fill="#1685a9") + theme(axis.text.x = element_text(angle =45))
+P3+P4+P5+P8
+```
+
+Just as we expected, people spend less time working (both full time and part time work) on weekend (Saturday and Sunday). have different amount of time away from home in weekend, but the cases number does not varies because of the weekend.
+Percentage of daily doctor visits (adjcli_prop), percentage of people who know someone in their local community with COVID-like symptoms (hcmcli_prop), and : Combination of several COVID-19 indicators available at this geographic level (cbine_indi) were smoothened, so there is no difference in these days.dai
+ 
+# Hypothesis testing
+
+Before hypothesis testing, we can premarily assume that their relationships are linear according to the plots below. 
+
+```{r message=FALSE}
+head(data3)
+P10 <- ggplot(data3, aes(y=cases, x = adjcli_prop))+geom_point()+geom_smooth(method = "lm")+theme_classic()
+P11 <- ggplot(data3, aes(y=cases, x = hcmcli_prop))+geom_point()+geom_smooth(method = "lm")+theme_classic()
+P12 <- ggplot(data3, aes(y=cases, x = cbine_indi))+geom_point()+geom_smooth(method = "lm")+theme_classic()
+P10 + P11 +P12
+```
+
+## Permutation test for linear relationship between dependent variables (lmp())
+
+The data set we are using has one observation per day, so, when we are examining the relationships, the variables are dependent to each other. 
+
+### Independence assumption is violated for general regression test lm()
+
+1. Linearity of the data. According to our line plots above, we assume this conditon met.
+
+2. Normality of residuals, we are not sure about it
+
+3. Homogeneity of residuals variance, we are not sure about this.
+
+4. Independence of residuals error terms. This condition is violated in our senario, as our data set are dependent.
+
+Conditions are not met, we can not use general regression test lm(). Instead, we can use lmp() test. lmp is lm modified to use permutation tests instead of normal theory tests. Like lm, it can be used to carry out regression, single stratum analysis of variance and analysis of covariance. lmp uses permutation tests to obtain p-values for linear models. Standard R linear model functions have been modified to produce p-values obtained from permutation tests instead of from normal theory. These values are advantageous when the degrees of freedom for error is small or non-existent, as is the case with saturated experimental designs, or when the data is drawn from a non-normal population, or when there are apparent outliers. lm() is pefectly appropriate to test our data set. 
+
+
+### Test Percentage of daily doctor visits (adjcli_prop)
+
+Hypothesis test to see if there is a significant linear relationship between adjcli_prop and covid cases
+
+
+1. hypothesis: h0: beta1 = 0, h1: beta1 != 0
+
+2. alpha = 0.05
+
+3. lmp() choosing parameter, we choose Prob in our situation
+
+Prob: Iterations terminate when the estimated standard error of the estimated proportion p is less than p*Ca. The iteration continues until all sources and coefficients meet this criterion or until maxIter is reached. See Anscome(1953) for the origin of the criterion.
+
+SPR: This method uses sequential probability ratio tests to decide between the hypotheses p0 and p1 for a strength (alpha, beta) test. The test terminates upon the acceptance or rejection of p0 or if maxIter is reached. See Wald (1947). The power of the SPR is beta at p0 and increases to 1-beta at p1. Placing p0 and p1 close together makes the cut off sharp.
+
+Exact: This method generates all permutations of Y. It will generally be found too time consuming for more than 10 or 11 observations, but note that aovp may be used to divide the data into small enough blocks for which exact permutation tests may be possible.
+
+```{r}
+model1 <- lmp(cases ~ adjcli_prop, data = data3, perm = "Prob")
+summary(model1)
+```
+
+3. conclusion
+
+Reject h0 because p-value ≤ 0.05, so we have strong evidence to suggest that percentage of daily doctor visits has a linear relationship with covid cases. 
+
+Coefficient of determination (R2): 0.54 
+
+54% of the variation in covid cases can be explained by its linear relationship with Percentage of daily doctor visits
+
+### Test percentage of people who know someone in their local community with COVID-like symptoms (hcmcli_prop)
+
+Hypothesis test to see if there is a significant linear relationship between percentage of people who know someone in their local community with COVID-like symptoms (hcmcli_prop) and covid cases
+
+
+1. hypothesis: h0: beta1 = 0, h1: beta1 != 0
+
+2. alpha = 0.05
+
+```{r}
+model2 <- lmp(cases ~ hcmcli_prop, data = data3, perm = "Prob")
+summary(model2)
+```
+
+3 conclusion
+
+Reject h0 because p-value ≤ 0.05, so we have strong evidence to suggest that percentage of people who know someone in their local community with COVID-like symptoms variable has a linear relationship with covid cases. 
+
+Coefficient of determination (R2): 0.7043 
+
+70.43% of the variation in covid cases can be explained by its linear relationship with bikescore
+
+
+### Test Combination of several COVID-19 indicators (cbine_indi)
+
+Hypothesis test to see if there is a significant linear relationship between Combination of several COVID-19 indicators (cbine_indi) and covid cases
+
+
+ hypothesis: h0: beta1 = 0, h1: beta1 != 0
+ 
+ alpha = 0.05
+
+```{r}
+model3 <- lmp(cases ~ cbine_indi, data = data3, perm = "Prob")
+summary(model3)
+```
+
+Reject H0 because p-value ≤ 0.05, so we have strong evidence to suggest that Combination of several COVID-19 indicators  has a linear
+relationship with covid cases. 
+
+Coefficient of determination (R2): 0.781
+
+78.1% of the variation in covid cases can be explained by its linear relationship with Combination of several COVID-19 indicators 
+
+## Two dependent sample means Test
+
+Hypothesis test to see if there is any change in the mean cases before and after school term began (assume fall term began at 8/15/2020)
+
+```{r}
+head(data)
+data4<-subset(data,select = c(date,cases))
+data4$group[data$date<="2020-08-15"] = "1" 
+data4$group[data$date>"2020-08-15"] = "2"
+head(data4)
+tail(data4)
+```
+
+1. Independent sample condition is violated, so we can not use two sample men t-test, we will use permutatin test instead.
+
+2. check conditions for  permutation test lmp()
+
+a. theoratically speaking, it works for every conditions.
+
+2. Permutation test hypothesis
+
+hypothesis  h0: beta1 = 0, h1: beta1 != 0
+
+beta1 is the true correlation coefficient for  predictor group.
+
+3. alpha = 0.05
+
+```{r}
+model4 <- lmp(cases ~ factor(group), data = data4, perm = "Prob")
+summary(model4)
+```
+
+In this case group is the predictor (this is equivalent to a t-test or a one-way ANOVA with two groups). beta1 = 38.88, the p-value is very small, it is less than 2.2e-16. 
+
+4 conclusion: p-value < 2.2e-16 < 0.05, we have strong evidence to reject ho, meaning that the cases is a linear relationship with predictor group. So we can say the mean cases vary by different group, which means there mean difference in group 1 and group 2 are statistically different.
+
+
+
